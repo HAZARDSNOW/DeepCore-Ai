@@ -233,8 +233,70 @@ def greedy_best_first_search(
 def a_star_search(
     env: DeepCoreEnv, heuristic: Callable[[DeepCoreState, DeepCoreEnv], float]
 ) -> Optional[SearchMetrics]:
-    """TODO: Implement A* Graph Search ordering the priority queue by f(n) = g(n) + h(n)."""
-    raise NotImplementedError
+    """
+    A* Graph Search ordering the priority queue by f(n) = g(n) + h(n).
+
+    The goal test happens when a node is popped, so with an admissible heuristic
+    the returned path is optimal. A cheaper path to an already expanded state
+    reopens it instead of being discarded, which keeps the search correct even
+    for inconsistent heuristics.
+    """
+    metrics = SearchMetrics(algorithm_name="A*")
+    start = env.get_initial_state()
+    if env.is_goal(start):
+        metrics.solved = True
+        metrics.status_message = "Goal reached."
+        return metrics
+
+    counter = 0
+    frontier: List[Tuple[float, int, int, DeepCoreState]] = [
+        (heuristic(start, env), counter, 0, start)
+    ]
+    explored: Set[DeepCoreState] = set()
+    parent: Dict[DeepCoreState, Tuple[Optional[DeepCoreState], Optional[str]]] = {start: (None, None)}
+    cost_so_far: Dict[DeepCoreState, int] = {start: 0}
+    metrics.max_frontier_size = 1
+    metrics.max_memory_size = 1
+
+    while frontier:
+        metrics.max_frontier_size = max(metrics.max_frontier_size, len(frontier))
+        metrics.max_memory_size = max(metrics.max_memory_size, len(frontier) + len(explored))
+
+        _, _, popped_g, state = heapq.heappop(frontier)
+
+        if popped_g != cost_so_far.get(state):
+            continue
+        if state in explored:
+            continue
+        if env.is_goal(state):
+            metrics.solved = True
+            metrics.solution_actions = _reconstruct_path(parent, state)
+            metrics.total_cost = cost_so_far[state]
+            metrics.status_message = "Goal reached."
+            return metrics
+
+        explored.add(state)
+        metrics.nodes_expanded += 1
+        metrics.explored_order.append(state.bot_pos)
+
+        for action, next_state, step_cost in env.get_successors(state):
+            metrics.nodes_generated += 1
+            tentative_g = cost_so_far[state] + step_cost
+            if tentative_g >= cost_so_far.get(next_state, math.inf):
+                continue
+
+            cost_so_far[next_state] = tentative_g
+            parent[next_state] = (state, action.value)
+            explored.discard(next_state)
+            counter += 1
+            f_value = tentative_g + heuristic(next_state, env)
+            heapq.heappush(frontier, (f_value, counter, tentative_g, next_state))
+            metrics.max_memory_size = max(
+                metrics.max_memory_size, len(frontier) + len(explored)
+            )
+
+    metrics.status_message = "No solution found."
+    return metrics
 
 
 # =============================================================================
