@@ -123,8 +123,58 @@ def uniform_cost_search(env: DeepCoreEnv) -> Optional[SearchMetrics]:
 def greedy_best_first_search(
     env: DeepCoreEnv, heuristic: Callable[[DeepCoreState, DeepCoreEnv], float]
 ) -> Optional[SearchMetrics]:
-    """TODO: Implement Greedy Best-First Search ordering the priority queue strictly by h(n)."""
-    raise NotImplementedError
+    """
+    Greedy Best-First Graph Search.
+
+    The frontier is a priority queue ordered strictly by h(n); the actual path
+    cost g(n) is only tracked for reporting, never for ordering. Goal test is
+    performed when a node is popped, like other priority-queue searches.
+    """
+    metrics = SearchMetrics(algorithm_name="GBFS")
+    start = env.get_initial_state()
+    if env.is_goal(start):
+        metrics.solved = True
+        metrics.status_message = "Goal reached."
+        return metrics
+
+    counter = 0
+    frontier: List[Tuple[float, int, DeepCoreState]] = [(heuristic(start, env), counter, start)]
+    frontier_set = {start}
+    explored: Set[DeepCoreState] = set()
+    parent: Dict[DeepCoreState, Tuple[Optional[DeepCoreState], Optional[str]]] = {start: (None, None)}
+    cost_so_far: Dict[DeepCoreState, int] = {start: 0}
+
+    while frontier:
+        metrics.max_frontier_size = max(metrics.max_frontier_size, len(frontier))
+        metrics.max_memory_size = max(metrics.max_memory_size, len(frontier) + len(explored))
+
+        _, _, state = heapq.heappop(frontier)
+        frontier_set.discard(state)
+
+        if state in explored:
+            continue
+        if env.is_goal(state):
+            metrics.solved = True
+            metrics.solution_actions = _reconstruct_path(parent, state)
+            metrics.total_cost = cost_so_far[state]
+            return metrics
+
+        explored.add(state)
+        metrics.nodes_expanded += 1
+        metrics.explored_order.append(state.bot_pos)
+
+        for action, next_state, step_cost in env.get_successors(state):
+            metrics.nodes_generated += 1
+            if next_state not in explored and next_state not in frontier_set:
+                parent[next_state] = (state, action.value)
+                cost_so_far[next_state] = cost_so_far[state] + step_cost
+                counter += 1
+                heapq.heappush(frontier, (heuristic(next_state, env), counter, next_state))
+                frontier_set.add(next_state)
+                metrics.max_memory_size = max(metrics.max_memory_size, len(frontier) + len(explored))
+
+    metrics.status_message = "No solution found."
+    return metrics
 
 
 # =============================================================================
