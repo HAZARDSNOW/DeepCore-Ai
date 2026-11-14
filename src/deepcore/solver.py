@@ -387,8 +387,70 @@ def weighted_a_star_search(
     heuristic: Callable[[DeepCoreState, DeepCoreEnv], float],
     weight: float = 1.5,
 ) -> Optional[SearchMetrics]:
-    """TODO (Bonus): Implement Weighted A* ordering the frontier by f(n) = g(n) + W * h(n)."""
-    raise NotImplementedError
+    """
+    Weighted A* Graph Search ordering the priority queue by f(n) = g(n) + W * h(n).
+
+    With W > 1 the heuristic is inflated, trading optimality for fewer
+    expansions. A cheaper path to an already expanded state reopens it, but
+    because the ordering itself is weighted, the returned path is only
+    guaranteed to be W-suboptimal.
+    """
+    metrics = SearchMetrics(algorithm_name="Weighted A*")
+    start = env.get_initial_state()
+    if env.is_goal(start):
+        metrics.solved = True
+        metrics.status_message = "Goal reached."
+        return metrics
+
+    counter = 0
+    frontier: List[Tuple[float, int, int, DeepCoreState]] = [
+        (weight * heuristic(start, env), counter, 0, start)
+    ]
+    explored: Set[DeepCoreState] = set()
+    parent: Dict[DeepCoreState, Tuple[Optional[DeepCoreState], Optional[str]]] = {start: (None, None)}
+    cost_so_far: Dict[DeepCoreState, int] = {start: 0}
+    metrics.max_frontier_size = 1
+    metrics.max_memory_size = 1
+
+    while frontier:
+        metrics.max_frontier_size = max(metrics.max_frontier_size, len(frontier))
+        metrics.max_memory_size = max(metrics.max_memory_size, len(frontier) + len(explored))
+
+        _, _, popped_g, state = heapq.heappop(frontier)
+
+        if popped_g != cost_so_far.get(state):
+            continue
+        if state in explored:
+            continue
+        if env.is_goal(state):
+            metrics.solved = True
+            metrics.solution_actions = _reconstruct_path(parent, state)
+            metrics.total_cost = cost_so_far[state]
+            metrics.status_message = "Goal reached."
+            return metrics
+
+        explored.add(state)
+        metrics.nodes_expanded += 1
+        metrics.explored_order.append(state.bot_pos)
+
+        for action, next_state, step_cost in env.get_successors(state):
+            metrics.nodes_generated += 1
+            tentative_g = cost_so_far[state] + step_cost
+            if tentative_g >= cost_so_far.get(next_state, math.inf):
+                continue
+
+            cost_so_far[next_state] = tentative_g
+            parent[next_state] = (state, action.value)
+            explored.discard(next_state)
+            counter += 1
+            f_value = tentative_g + weight * heuristic(next_state, env)
+            heapq.heappush(frontier, (f_value, counter, tentative_g, next_state))
+            metrics.max_memory_size = max(
+                metrics.max_memory_size, len(frontier) + len(explored)
+            )
+
+    metrics.status_message = "No solution found."
+    return metrics
 
 
 # =============================================================================
