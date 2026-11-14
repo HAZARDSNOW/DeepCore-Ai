@@ -138,14 +138,94 @@ def depth_first_search(env: DeepCoreEnv, max_expansions: Optional[int] = None) -
     return metrics
 
 
-
 def iterative_deepening_search(
     env: DeepCoreEnv,
     max_depth: Optional[int] = None,
     max_expansions: Optional[int] = None,
 ) -> Optional[SearchMetrics]:
-    """TODO: Implement Iterative Deepening Search (IDS)."""
-    raise NotImplementedError
+    metrics = SearchMetrics(algorithm_name="IDS")
+    start = env.get_initial_state()
+
+    if env.is_goal(start):
+        metrics.solved = True
+        return metrics
+
+    depth = 0
+
+    while max_depth is None or depth <= max_depth:
+        frontier = [[start, depth, 0, None, None]]
+        path = {start}
+        actions = []
+
+        while frontier:
+            metrics.max_frontier_size = max(
+                metrics.max_frontier_size, len(frontier)
+            )
+            metrics.max_memory_size = max(
+                metrics.max_memory_size, len(frontier)
+            )
+
+            current = frontier[-1]
+            state = current[0]
+            remaining_depth = current[1]
+
+            if env.is_goal(state):
+                metrics.solved = True
+                metrics.solution_actions = actions.copy()
+                metrics.total_cost = current[2]
+                return metrics
+
+            if current[3] is None:
+                if remaining_depth == 0:
+                    frontier.pop()
+                    path.remove(state)
+
+                    if actions:
+                        actions.pop()
+
+                    continue
+
+                if max_expansions is not None and metrics.nodes_expanded >= max_expansions:
+                    metrics.status_message = "Expansion limit reached."
+                    return metrics
+
+                metrics.nodes_expanded += 1
+                metrics.explored_order.append(state.bot_pos)
+
+                successors = list(env.get_successors(state))
+                current[3] = successors
+                current[4] = len(successors) - 1
+
+            if current[4] < 0:
+                frontier.pop()
+                path.remove(state)
+
+                if actions:
+                    actions.pop()
+
+                continue
+
+            action, next_state, step_cost = current[3][current[4]]
+            current[4] -= 1
+            metrics.nodes_generated += 1
+
+            if next_state not in path:
+                path.add(next_state)
+                actions.append(action.value)
+
+                frontier.append([
+                    next_state,
+                    remaining_depth - 1,
+                    current[2] + step_cost,
+                    None,
+                    None
+                ])
+
+        depth += 1
+
+    metrics.status_message = "No solution found."
+    return metrics
+
 
 
 # =============================================================================
