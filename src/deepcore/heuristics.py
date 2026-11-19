@@ -85,8 +85,35 @@ def h_naive_manhattan(state: DeepCoreState, env: DeepCoreEnv) -> float:
 
 
 def h1_basic(state: DeepCoreState, env: DeepCoreEnv) -> float:
-    """TODO: Build an admissible MST-plus-payload lower bound; return 0 at a goal."""
-    raise NotImplementedError
+    """
+    Basic Heuristic: Minimum Spanning Tree over bot, miners, and elevator, plus payload cost.
+    """
+    if env.is_goal(state):
+        return 0.0
+
+    distances = _get_wall_aware_distances(env)
+
+    def step_dist(u: Pos, v: Pos) -> float:
+        d = distances.get((u, v))
+        if d is None:
+            return float(abs(u[0] - v[0]) + abs(u[1] - v[1]))
+        return float(d)
+
+    sites: List[Pos] = [state.bot_pos, *sorted(state.miners), env.elevator_pos]
+    mst_cost = _prim_mst_cost(sites, step_dist)
+
+    total_miners = state.carried + len(state.miners)
+    if state.miners:
+        # whichever miner is collected last, the pod then carries every miner
+        last_pickup = min(
+            state.miners, key=lambda p: step_dist(p, env.elevator_pos)
+        )
+        payload_steps = step_dist(last_pickup, env.elevator_pos)
+    else:
+        payload_steps = step_dist(state.bot_pos, env.elevator_pos)
+
+    payload_cost = env.PAYLOAD_SURCHARGE * total_miners * payload_steps
+    return float(mst_cost + payload_cost)
 
 
 def _is_corner_deadlock(pos: Pos, env: DeepCoreEnv) -> bool:
