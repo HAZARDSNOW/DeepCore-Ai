@@ -478,10 +478,13 @@ def greedy_best_first_search(
         for action, next_state, step_cost in env.get_successors(state):
             metrics.nodes_generated += 1
             if next_state not in explored and next_state not in frontier_set:
+                h_value = heuristic(next_state, env)
+                if math.isinf(h_value):
+                    continue
                 parent[next_state] = (state, action.value)
                 cost_so_far[next_state] = cost_so_far[state] + step_cost
                 counter += 1
-                heapq.heappush(frontier, (heuristic(next_state, env), counter, next_state))
+                heapq.heappush(frontier, (h_value, counter, next_state))
                 frontier_set.add(next_state)
                 metrics.max_memory_size = max(metrics.max_memory_size, len(frontier) + len(explored))
 
@@ -547,11 +550,15 @@ def a_star_search(
             if tentative_g >= cost_so_far.get(next_state, math.inf):
                 continue
 
+            h_value = heuristic(next_state, env)
+            if math.isinf(h_value):
+                continue
+
             cost_so_far[next_state] = tentative_g
             parent[next_state] = (state, action.value)
             explored.discard(next_state)
             counter += 1
-            f_value = tentative_g + heuristic(next_state, env)
+            f_value = tentative_g + h_value
             heapq.heappush(frontier, (f_value, counter, tentative_g, next_state))
             metrics.max_memory_size = max(
                 metrics.max_memory_size, len(frontier) + len(explored)
@@ -621,11 +628,15 @@ def weighted_a_star_search(
             if tentative_g >= cost_so_far.get(next_state, math.inf):
                 continue
 
+            h_value = heuristic(next_state, env)
+            if math.isinf(h_value):
+                continue
+
             cost_so_far[next_state] = tentative_g
             parent[next_state] = (state, action.value)
             explored.discard(next_state)
             counter += 1
-            f_value = tentative_g + weight * heuristic(next_state, env)
+            f_value = tentative_g + weight * h_value
             heapq.heappush(frontier, (f_value, counter, tentative_g, next_state))
             metrics.max_memory_size = max(
                 metrics.max_memory_size, len(frontier) + len(explored)
