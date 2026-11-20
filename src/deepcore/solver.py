@@ -649,13 +649,97 @@ def weighted_a_star_search(
 # =============================================================================
 # BONUS 2: Iterative Deepening A* (IDA*) — [STUDENT BONUS TODO]
 # =============================================================================
+
 def ida_star_search(
     env: DeepCoreEnv,
     heuristic: Callable[[DeepCoreState, DeepCoreEnv], float],
     max_expansions: Optional[int] = None,
 ) -> Optional[SearchMetrics]:
-    """TODO (Bonus): Implement Iterative Deepening A* (IDA*) using f-cost threshold contours."""
-    raise NotImplementedError
+    metrics = SearchMetrics(algorithm_name="IDA*")
+    start = env.get_initial_state()
+
+    if env.is_goal(start):
+        metrics.solved = True
+        metrics.status_message = "Goal reached."
+        return metrics
+
+    threshold = heuristic(start, env)
+    path = {start}
+    parent = {start: (None, None)}
+    limit_reached = False
+
+    def search(state, cost, current_threshold):
+        nonlocal limit_reached
+
+        f_value = cost + heuristic(state, env)
+
+        if f_value > current_threshold:
+            return f_value
+
+        if env.is_goal(state):
+            metrics.solved = True
+            metrics.solution_actions = _reconstruct_path(parent, state)
+            metrics.total_cost = cost
+            metrics.status_message = "Goal reached."
+            return f_value
+
+        if max_expansions is not None and metrics.nodes_expanded >= max_expansions:
+            limit_reached = True
+            return math.inf
+
+        metrics.nodes_expanded += 1
+        metrics.explored_order.append(state.bot_pos)
+
+        min_threshold = math.inf
+
+        for action, next_state, step_cost in env.get_successors(state):
+            metrics.nodes_generated += 1
+
+            if next_state in path:
+                continue
+
+            path.add(next_state)
+            parent[next_state] = (state, action.value)
+
+            result = search(
+                next_state,
+                cost + step_cost,
+                current_threshold
+            )
+
+            if metrics.solved or limit_reached:
+                return result
+
+            min_threshold = min(min_threshold, result)
+
+            path.remove(next_state)
+            del parent[next_state]
+
+        return min_threshold
+
+    while True:
+        metrics.max_frontier_size = max(
+            metrics.max_frontier_size, len(path)
+        )
+        metrics.max_memory_size = max(
+            metrics.max_memory_size, len(path)
+        )
+
+        next_threshold = search(start, 0, threshold)
+
+        if metrics.solved:
+            return metrics
+
+        if limit_reached:
+            metrics.status_message = "Expansion limit reached."
+            return metrics
+
+        if next_threshold == math.inf:
+            metrics.status_message = "No solution found."
+            return metrics
+
+        threshold = next_threshold
+
 
 
 # =============================================================================
