@@ -231,12 +231,136 @@ def iterative_deepening_search(
 # =============================================================================
 # 3. Bidirectional Search — [STUDENT TODO]
 # =============================================================================
+
 def bidirectional_search(env: DeepCoreEnv) -> Optional[SearchMetrics]:
-    """
-    TODO: Implement Bidirectional Search expanding forward from `env.get_initial_state()`
-    via `env.get_successors(s)` and backward from `env.get_goal_states()` via `env.get_predecessors(s)`.
-    """
-    raise NotImplementedError
+    metrics = SearchMetrics(algorithm_name="Bidirectional")
+    start = env.get_initial_state()
+
+    if env.is_goal(start):
+        metrics.solved = True
+        return metrics
+
+    goal_states = env.get_goal_states()
+
+    if not goal_states:
+        metrics.status_message = "No solution found."
+        return metrics
+
+    frontier_forward = deque([start])
+    frontier_backward = deque(goal_states)
+
+    visited_forward = {start}
+    visited_backward = set(goal_states)
+
+    parent_forward = {start: (None, None)}
+    parent_backward = {
+        state: (None, None) for state in goal_states
+    }
+
+    cost_forward = {start: 0}
+    cost_backward = {state: 0 for state in goal_states}
+
+    metrics.max_frontier_size = len(frontier_forward) + len(frontier_backward)
+    metrics.max_memory_size = len(visited_forward) + len(visited_backward)
+
+    meeting_state = None
+
+    while frontier_forward and frontier_backward and meeting_state is None:
+        forward_size = len(frontier_forward)
+
+        for _ in range(forward_size):
+            state = frontier_forward.popleft()
+
+            metrics.nodes_expanded += 1
+            metrics.explored_order.append(state.bot_pos)
+
+            for action, next_state, step_cost in env.get_successors(state):
+                metrics.nodes_generated += 1
+
+                if next_state not in visited_forward:
+                    visited_forward.add(next_state)
+                    parent_forward[next_state] = (state, action.value)
+                    cost_forward[next_state] = cost_forward[state] + step_cost
+                    frontier_forward.append(next_state)
+
+                    metrics.max_memory_size = max(
+                        metrics.max_memory_size,
+                        len(visited_forward) + len(visited_backward)
+                    )
+
+                    if next_state in visited_backward:
+                        meeting_state = next_state
+                        break
+
+            metrics.max_frontier_size = max(
+                metrics.max_frontier_size,
+                len(frontier_forward) + len(frontier_backward)
+            )
+
+            if meeting_state is not None:
+                break
+
+        if meeting_state is not None:
+            break
+
+        backward_size = len(frontier_backward)
+
+        for _ in range(backward_size):
+            state = frontier_backward.popleft()
+
+            metrics.nodes_expanded += 1
+            metrics.explored_order.append(state.bot_pos)
+
+            for action, prev_state, step_cost in env.get_predecessors(state):
+                metrics.nodes_generated += 1
+
+                if prev_state not in visited_backward:
+                    visited_backward.add(prev_state)
+                    parent_backward[prev_state] = (state, action.value)
+                    cost_backward[prev_state] = cost_backward[state] + step_cost
+                    frontier_backward.append(prev_state)
+
+                    metrics.max_memory_size = max(
+                        metrics.max_memory_size,
+                        len(visited_forward) + len(visited_backward)
+                    )
+
+                    if prev_state in visited_forward:
+                        meeting_state = prev_state
+                        break
+
+            metrics.max_frontier_size = max(
+                metrics.max_frontier_size,
+                len(frontier_forward) + len(frontier_backward)
+            )
+
+            if meeting_state is not None:
+                break
+
+    if meeting_state is not None:
+        forward_actions = _reconstruct_path(
+            parent_forward, meeting_state
+        )
+
+        backward_actions = []
+        state = meeting_state
+
+        while parent_backward[state][0] is not None:
+            next_state, action = parent_backward[state]
+            backward_actions.append(action)
+            state = next_state
+
+        metrics.solved = True
+        metrics.solution_actions = forward_actions + backward_actions
+        metrics.total_cost = (
+            cost_forward[meeting_state] + cost_backward[meeting_state]
+        )
+        metrics.status_message = "Goal reached."
+        return metrics
+
+    metrics.status_message = "No solution found."
+    return metrics
+
 
 
 # =============================================================================
