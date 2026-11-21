@@ -641,6 +641,7 @@ def ida_star_search(
     heuristic: Callable[[DeepCoreState, DeepCoreEnv], float],
     max_expansions: Optional[int] = None,
 ) -> Optional[SearchMetrics]:
+
     metrics = SearchMetrics(algorithm_name="IDA*")
     start = env.get_initial_state()
 
@@ -649,82 +650,120 @@ def ida_star_search(
         metrics.status_message = "Goal reached."
         return metrics
 
-    threshold = heuristic(start, env)
-    path = {start}
-    parent = {start: (None, None)}
-    limit_reached = False
+    h_cache = {}
 
-    def search(state, cost, current_threshold):
-        nonlocal limit_reached
+    def get_h(state):
+        if state not in h_cache:
+            h_cache[state] = heuristic(state, env)
+        return h_cache[state]
 
-        f_value = cost + heuristic(state, env)
+    threshold = get_h(start)
 
-        if f_value > current_threshold:
-            return f_value
+    while not math.isinf(threshold):
+        stack = [[start, 0, None, 0]]
+        path = {start}
+        best_g = {start: 0}
+        actions = []
+        next_threshold = math.inf
 
-        if env.is_goal(state):
-            metrics.solved = True
-            metrics.solution_actions = _reconstruct_path(parent, state)
-            metrics.total_cost = cost
-            metrics.status_message = "Goal reached."
-            return f_value
-
-        if max_expansions is not None and metrics.nodes_expanded >= max_expansions:
-            limit_reached = True
-            return math.inf
-
-        metrics.nodes_expanded += 1
-        metrics.explored_order.append(state.bot_pos)
-
-        min_threshold = math.inf
-
-        for action, next_state, step_cost in env.get_successors(state):
-            metrics.nodes_generated += 1
-
-            if next_state in path:
-                continue
-
-            path.add(next_state)
-            parent[next_state] = (state, action.value)
-
-            result = search(
-                next_state,
-                cost + step_cost,
-                current_threshold
+        while stack:
+            metrics.max_frontier_size = max(
+                metrics.max_frontier_size, len(stack)
+            )
+            metrics.max_memory_size = max(
+                metrics.max_memory_size,
+                len(stack) + len(best_g)
             )
 
-            if metrics.solved or limit_reached:
-                return result
+            state, cost, successors, index = stack[-1]
+            f_value = cost + get_h(state)
 
-            min_threshold = min(min_threshold, result)
+            if f_value > threshold:
+                next_threshold = min(next_threshold, f_value)
+                stack.pop()
+                path.remove(state)
 
-            path.remove(next_state)
-            del parent[next_state]
+                if actions:
+                    actions.pop()
 
-        return min_threshold
+                continue
 
-    while True:
-        metrics.max_frontier_size = max(
-            metrics.max_frontier_size, len(path)
-        )
-        metrics.max_memory_size = max(
-            metrics.max_memory_size, len(path)
-        )
+            if env.is_goal(state):
+                metrics.solved = True
+                metrics.solution_actions = actions.copy()
+                metrics.total_cost = cost
+                metrics.status_message = "Goal reached."
+                return metrics
 
-        next_threshold = search(start, 0, threshold)
+            if successors is None:
+                if (
+                    max_expansions is not None
+                    and metrics.nodes_expanded >= max_expansions
+                ):
+                    metrics.status_message = "Expansion limit reached."
+                    return metrics
 
-        if metrics.solved:
-            return metrics
+                metrics.nodes_expanded += 1
+                metrics.explored_order.append(state.bot_pos)
+                successors = []
 
-        if limit_reached:
-            metrics.status_message = "Expansion limit reached."
-            return metrics
+                for action, child, step_cost in env.get_successors(state):
+                    metrics.nodes_generated += 1
+
+                    if child in path:
+                        continue
+
+                    new_cost = cost + step_cost
+                    h_value = get_h(child)
+
+                    if math.isinf(h_value):
+                        continue
+
+                    new_f = new_cost + h_value
+
+                    if new_f > threshold:
+                        next_threshold = min(next_threshold, new_f)
+                        continue
+
+                    if new_cost < best_g.get(child, math.inf):
+                        best_g[child] = new_cost
+                        successors.append(
+                            (new_f, action, child, step_cost)
+                        )
+
+                successors.sort(key=lambda item: item[0])
+                stack[-1][2] = successors
+
+            if index >= len(successors):
+                stack.pop()
+                path.remove(state)
+
+                if actions:
+                    actions.pop()
+
+                continue
+
+            _, action, child, step_cost = successors[index]
+            stack[-1][3] += 1
+
+            path.add(child)
+            actions.append(action.value)
+
+            stack.append([
+                child,
+                cost + step_cost,
+                None,
+                0
+            ])
 
         if next_threshold == math.inf:
-            metrics.status_message = "No solution found."
-            return metrics
+            break
 
         threshold = next_threshold
+
+    metrics.status_message = "No solution found."
+    return metrics
+
 
 
 
