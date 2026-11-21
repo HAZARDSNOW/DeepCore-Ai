@@ -150,81 +150,67 @@ def iterative_deepening_search(
         metrics.solved = True
         return metrics
 
-    depth = 0
+    depth_limit = 0
 
-    while max_depth is None or depth <= max_depth:
-        frontier = [[start, depth, 0, None, None]]
-        path = {start}
-        actions = []
+    while max_depth is None or depth_limit <= max_depth:
+        stack = [(start, 0)]
+        parent = {start: (None, None)}
+        costs = {start: 0}
+        best_depth = {start: 0}
+        cutoff = False
 
-        while frontier:
+        while stack:
             metrics.max_frontier_size = max(
-                metrics.max_frontier_size, len(frontier)
+                metrics.max_frontier_size, len(stack)
             )
             metrics.max_memory_size = max(
-                metrics.max_memory_size, len(frontier)
+                metrics.max_memory_size,
+                len(stack) + len(best_depth)
             )
 
-            current = frontier[-1]
-            state = current[0]
-            remaining_depth = current[1]
+            state, depth = stack.pop()
+
+            if depth != best_depth.get(state):
+                continue
 
             if env.is_goal(state):
                 metrics.solved = True
-                metrics.solution_actions = actions.copy()
-                metrics.total_cost = current[2]
+                metrics.solution_actions = _reconstruct_path(parent, state)
+                metrics.total_cost = costs[state]
+                metrics.status_message = "Goal reached."
                 return metrics
 
-            if current[3] is None:
-                if remaining_depth == 0:
-                    frontier.pop()
-                    path.remove(state)
+            if max_expansions is not None and metrics.nodes_expanded >= max_expansions:
+                metrics.status_message = "Expansion limit reached."
+                return metrics
 
-                    if actions:
-                        actions.pop()
+            metrics.nodes_expanded += 1
+            metrics.explored_order.append(state.bot_pos)
 
-                    continue
+            successors = env.get_successors(state)
 
-                if max_expansions is not None and metrics.nodes_expanded >= max_expansions:
-                    metrics.status_message = "Expansion limit reached."
-                    return metrics
+            for action, child, step_cost in reversed(successors):
+                metrics.nodes_generated += 1
+                new_depth = depth + 1
 
-                metrics.nodes_expanded += 1
-                metrics.explored_order.append(state.bot_pos)
+                if new_depth < best_depth.get(child, float("inf")):
+                    if depth >= depth_limit:
+                        cutoff = True
+                        continue
 
-                successors = list(env.get_successors(state))
-                current[3] = successors
-                current[4] = len(successors) - 1
+                    best_depth[child] = new_depth
+                    parent[child] = (state, action.value)
+                    costs[child] = costs[state] + step_cost
+                    stack.append((child, new_depth))
 
-            if current[4] < 0:
-                frontier.pop()
-                path.remove(state)
+        if not cutoff:
+            break
 
-                if actions:
-                    actions.pop()
-
-                continue
-
-            action, next_state, step_cost = current[3][current[4]]
-            current[4] -= 1
-            metrics.nodes_generated += 1
-
-            if next_state not in path:
-                path.add(next_state)
-                actions.append(action.value)
-
-                frontier.append([
-                    next_state,
-                    remaining_depth - 1,
-                    current[2] + step_cost,
-                    None,
-                    None
-                ])
-
-        depth += 1
+        depth_limit += 1
 
     metrics.status_message = "No solution found."
     return metrics
+
 
 
 
