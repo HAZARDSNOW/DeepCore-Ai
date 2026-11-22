@@ -770,10 +770,224 @@ def ida_star_search(
 # =============================================================================
 # BONUS 3: Simplified Memory-Bounded A* (SMA*) — [STUDENT BONUS TODO]
 # =============================================================================
+class _SMAStarNode:
+    __slots__ = (
+        "state",
+        "parent",
+        "action",
+        "g",
+        "h",
+        "f",
+        "children",
+        "depth",
+        "live",
+        "expanded",
+        "expanding",
+    )
+
+    def __init__(
+        self,
+        state: DeepCoreState,
+        parent: Optional["_SMAStarNode"],
+        action: Optional[str],
+        g: int,
+        h_value: float,
+        depth: int,
+    ) -> None:
+        self.state = state
+        self.parent = parent
+        self.action = action
+        self.g = g
+        self.h = h_value
+        self.f = g + h_value
+        self.children: List["_SMAStarNode"] = []
+        self.depth = depth
+        self.live = True
+        self.expanded = False
+        self.expanding = False
+
+
+def _sma_star_solution(goal_node: "_SMAStarNode") -> List[str]:
+    actions: List[str] = []
+    current: Optional["_SMAStarNode"] = goal_node
+    while current is not None and current.parent is not None:
+        if current.action is not None:
+            actions.append(current.action)
+        current = current.parent
+    actions.reverse()
+    return actions
+
+
 def sma_star_search(
     env: DeepCoreEnv,
     heuristic: Callable[[DeepCoreState, DeepCoreEnv], float],
     memory_limit: Optional[int] = None,
 ) -> Optional[SearchMetrics]:
-    """TODO (Bonus): Implement Simplified Memory-Bounded A* (SMA*)."""
-    raise NotImplementedError
+    metrics = SearchMetrics(algorithm_name="SMA*")
+    start = env.get_initial_state()
+    if env.is_goal(start):
+        metrics.solved = True
+        metrics.status_message = "Goal reached."
+        return metrics
+
+    if memory_limit is not None and memory_limit < 2:
+        metrics.status_message = "Memory limit is too small to run SMA*."
+        return metrics
+
+    limit = math.inf if memory_limit is None else int(memory_limit)
+    track_forgettable = memory_limit is not None
+
+    counter = 0
+
+    def next_ticket() -> int:
+        nonlocal counter
+        counter += 1
+        return counter
+
+    root = _SMAStarNode(start, None, None, 0, heuristic(start, env), 0)
+
+    memory: Dict[DeepCoreState, _SMAStarNode] = {start: root}
+    open_nodes: Set[_SMAStarNode] = set()
+    frontier: List[Tuple[float, int, int, _SMAStarNode]] = []
+    forgettable: List[Tuple[float, int, int, _SMAStarNode]] = []
+
+    metrics.max_memory_size = len(memory)
+
+    def push_open(node: _SMAStarNode) -> None:
+        open_nodes.add(node)
+        heapq.heappush(frontier, (node.f, -node.depth, next_ticket(), node))
+        metrics.max_frontier_size = max(metrics.max_frontier_size, len(open_nodes))
+
+    def push_forgettable(node: _SMAStarNode) -> None:
+        if track_forgettable:
+            heapq.heappush(forgettable, (-node.f, node.depth, next_ticket(), node))
+
+    def backup(node: Optional[_SMAStarNode]) -> None:
+        while node is not None:
+            new_f = min((child.f for child in node.children), default=node.f)
+            if new_f == node.f:
+                break
+            node.f = new_f
+            push_forgettable(node)
+            node = node.parent
+
+    def detach(parent: Optional[_SMAStarNode], child: _SMAStarNode) -> None:
+        if parent is None or child not in parent.children:
+            return
+        parent.children.remove(child)
+        lost_last_child = not parent.children
+        backup(parent)
+        if lost_last_child:
+            push_forgettable(parent)
+            if (
+                parent.live
+                and parent.expanded
+                and not parent.expanding
+                and parent not in open_nodes
+            ):
+                push_open(parent)
+
+    def forget_leaf() -> bool:
+        while forgettable:
+            neg_f, _, _, node = heapq.heappop(forgettable)
+            if (
+                not node.live
+                or node.children
+                or node is root
+                or node.expanding
+                or -neg_f != node.f
+                or (node not in open_nodes and not node.expanded)
+            ):
+                continue
+            node.live = False
+            memory.pop(node.state, None)
+            open_nodes.discard(node)
+            detach(node.parent, node)
+            return True
+        return False
+
+    def forget_branch(node: _SMAStarNode) -> None:
+        parent = node.parent
+        stack = [node]
+        while stack:
+            current = stack.pop()
+            if not current.live:
+                continue
+            current.live = False
+            memory.pop(current.state, None)
+            open_nodes.discard(current)
+            stack.extend(current.children)
+            current.children = []
+        detach(parent, node)
+
+    push_open(root)
+    push_forgettable(root)
+
+    while frontier:
+        neg_f, _, _, node = heapq.heappop(frontier)
+        if node not in open_nodes or node.f != neg_f:
+            continue
+        open_nodes.discard(node)
+
+        if env.is_goal(node.state):
+            metrics.solved = True
+            metrics.solution_actions = _sma_star_solution(node)
+            metrics.total_cost = node.g
+            metrics.status_message = "Goal reached."
+            return metrics
+
+        node.expanded = True
+        node.expanding = True
+        metrics.nodes_expanded += 1
+        metrics.explored_order.append(node.state.bot_pos)
+
+        ran_out_of_memory = False
+
+        for action, next_state, step_cost in env.get_successors(node.state):
+            metrics.nodes_generated += 1
+            if next_state == node.state:
+                continue
+
+            tentative_g = node.g + step_cost
+            existing = memory.get(next_state)
+            if existing is not None and tentative_g >= existing.g:
+                continue
+
+            h_value = heuristic(next_state, env)
+            if math.isinf(h_value):
+                continue
+
+            while len(memory) >= limit:
+                if not forget_leaf():
+                    ran_out_of_memory = True
+                    break
+            if ran_out_of_memory:
+                break
+
+            if existing is not None:
+                forget_branch(existing)
+
+            child = _SMAStarNode(
+                next_state,
+                node,
+                action.value,
+                tentative_g,
+                h_value,
+                node.depth + 1,
+            )
+            memory[next_state] = child
+            node.children.append(child)
+            push_open(child)
+            push_forgettable(child)
+            metrics.max_memory_size = max(metrics.max_memory_size, len(memory))
+
+        node.expanding = False
+        if node.children:
+            backup(node)
+
+        if ran_out_of_memory:
+            metrics.status_message = "Memory limit reached."
+            return metrics
+
+    metrics.status_message = "No solution found."
+    return metrics
